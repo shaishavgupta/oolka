@@ -1,13 +1,12 @@
 from rest_framework import generics
 from rest_framework.permissions import IsAdminUser, AllowAny
-from rest_framework.views import APIView
 from .models import Event, Booking
-from users.models import User
 from .serializers import EventSerializer, BookingSerializer
 from rest_framework.response import Response
-from rest_framework import status
+from django.core.cache.backends.base import DEFAULT_TIMEOUT
 from django.core.cache import cache
-
+from rest_framework import status
+from users.models import User
 
 # Create your views here.
 class EventView(generics.ListCreateAPIView):
@@ -33,43 +32,53 @@ class BookingView(generics.ListCreateAPIView):
     serializer_class = BookingSerializer
 
     def post(self, request, *args, **kwargs):
+        event_id = kwargs.get('pk')
+        user_id = request.data.get('user_id')
+        tickets = request.data.get('tickets')
 
-        event_id = self.kwargs.get('pk')
-        if event_id is None:
-            return Response({"message": "event_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-
+        ## checks event is valid
         event_qs = Event.objects.filter(id=event_id)
-        if not event_qs.exists() or not event_qs.first().isValid():
+        if not event_qs.exists() or not event_qs.first().is_valid():
             return Response({"message": "invalid event"}, status=status.HTTP_400_BAD_REQUEST)
         event = event_qs.first()
-
-        user_id = request.data.get('user_id')
-        if user_id is None:
-            return Response({"message": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-
+        
+        ## have required number of tickets available
+        if event.available_tickets < tickets:
+            return Response({'status': 'Not enough tickets available'}, status=400)
+        
+        ## user valid
         user_qs = User.objects.filter(id=user_id)
-        if not user_qs.exists() or not user_qs.first().isValid():
+        if not user_qs.exists() or not user_qs.first().is_valid():
             return Response({"message": "invalid user"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        ## distributed lock
-        lock_id = f"event_{event_id}"
-        available_tickets = cache.get(lock_id)
-        if available_tickets == 0:
-            return Response({"message": "no tickets available"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        cache.set(lock_id, available_tickets - 1)
-        booking = Booking.objects.create(event=event, user_id=user_id, price=event.price)
-        if booking is None or not booking.isValid():
-            cache.set(lock_id, available_tickets)
-            return Response({"message": "booking failed"}, status=status.HTTP_400_BAD_REQUEST)
 
-        ## update event price and available tickets
-        event.available_tickets = available_tickets - 1
-        event.price = event.price + 5
-        event.save()
-        
-        return Response(self.serializer_class(booking).data)
-        
+        ## distributed locks
+        lock_id = 'lock:event:' + str(event_id)
+        acquire_lock = cache.add(lock_id, 'true', DEFAULT_TIMEOUT)
+
+        if acquire_lock:
+            try:
+                event.refresh_from_db()
+                if event.available_tickets >= tickets:
+                    event.price = event.price + 5
+                    event.available_tickets -= tickets
+
+                    booking = Booking.objects.create(
+                        event_id=event_id,
+                        user_id=user_id,
+                        tickets=tickets,
+                        price = event.price
+                    )
+
+                    event.save()
+                    return Response({'status': 'Booking successful', "data":self.serializer_class(booking).data})
+                else:
+                    return Response({'status': 'Not enough tickets available'}, status=400)
+            finally:
+                cache.delete(lock_id)  # Release the lock
+
+        else:
+            return Response({'status': 'Tickets are being booked, please try again later'}, status=429)
+
         
 
     

@@ -11,5 +11,5 @@ class User(models.Model):
     def __str__(self):
         return f'{self.email}-{self.name}-{self.is_active}'
     
-    def isValid(self):
+    def is_valid(self):
         return self.is_active

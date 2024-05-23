@@ -24,7 +24,7 @@ class Event(models.Model):
     def __str__(self):
         return f'{self.date}-{self.name}-{self.is_active}'
 
-    def isValid(self):
+    def is_valid(self):
         return self.available_tickets > 0 and self.available_tickets <= self.total_tickets and self.is_active and self.date > timezone.now().date()
     
 @receiver(post_save, sender=Event)
@@ -45,11 +45,12 @@ class Booking(models.Model):
     updated_at = models.DateTimeField(auto_now=True, serialize=False)
     is_active = models.BooleanField(default=True, blank=False, null=False, serialize=False)
     price = models.FloatField(null=False, blank=False)
+    tickets = models.BigIntegerField(null=False, blank=False)
 
     def __str__(self):
         return f'{self.user.email}-{self.event.name}-{self.is_active}'
 
-    def isValid(self):
+    def is_valid(self):
         return self.is_active
 
 @receiver(pre_save, sender=Booking)
@@ -57,8 +58,8 @@ def validate(sender, instance, **kwargs):
     if instance.price <= 0:
         raise ValidationError("Price cannot be less than or equal to 0")
 
-    if not instance.user.isValid():
+    if not instance.user.is_valid():
         raise ValidationError("User is not active")
 
-    if not instance.event.isValid():
+    if not instance.event.is_valid():
         raise ValidationError("Event is not active")
