@@ -4,6 +4,7 @@ from django.db import models
 class User(models.Model):
     name = models.CharField(max_length=30, blank=False, null=False)
     email = models.EmailField(blank=False, null=False, db_index=True, unique=True)
+    password = models.CharField(max_length=30, blank=False, null=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True, blank=False, null=False)
